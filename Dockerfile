@@ -2,12 +2,18 @@
 ## It has all the necessary components to play/debug with a single node appliance, running etcd
 ARG PG_MAJOR=15
 ARG COMPRESS=false
-ARG PGHOME=/home/postgres
+ARG PGHOME=/var/lib/postgresql
 ARG PGDATA=$PGHOME/data
 ARG LC_ALL=C.UTF-8
 ARG LANG=C.UTF-8
 
 FROM postgres:$PG_MAJOR as builder
+
+RUN apt-get update -y\
+    && apt-get install python3 python3-pip daemontools wget -y\
+    && pip3 install --upgrade setuptools\
+    && pip3 install psycopg2-binary \
+    && apt-get install -y pgbackrest
 
 ARG PGHOME
 ARG PGDATA
@@ -119,7 +125,7 @@ RUN if [ "$COMPRESS" = "true" ]; then \
 FROM scratch
 COPY --from=builder / /
 
-LABEL maintainer="Alexander Kukushkin <akukushkin@microsoft.com>"
+LABEL maintainer="David Szabo <david.szabo"
 
 ARG PG_MAJOR
 ARG COMPRESS
@@ -137,22 +143,10 @@ COPY patroni /patroni/
 COPY extras/confd/conf.d/haproxy.toml /etc/confd/conf.d/
 COPY extras/confd/templates/haproxy.tmpl /etc/confd/templates/
 COPY patroni*.py docker/entrypoint.sh /
-COPY postgres?.yml $PGHOME/
 
 WORKDIR $PGHOME
 
-RUN sed -i 's/env python/&3/' /patroni*.py \
-    # "fix" patroni configs
-    && sed -i 's/^\(  connect_address:\|  - host\)/#&/' postgres?.yml \
-    && sed -i 's/^  listen: 127.0.0.1/  listen: 0.0.0.0/' postgres?.yml \
-    && sed -i "s|^\(  data_dir: \).*|\1$PGDATA|" postgres?.yml \
-    && sed -i "s|^#\(  bin_dir: \).*|\1$PGBIN|" postgres?.yml \
-    && sed -i 's/^  - encoding: UTF8/  - locale: en_US.UTF-8\n&/' postgres?.yml \
-    && sed -i 's/^\(scope\|name\|etcd\|  host\|  authentication\|  pg_hba\|  parameters\):/#&/' postgres?.yml \
-    && sed -i 's/^    \(replication\|superuser\|rewind\|unix_socket_directories\|\(\(  \)\{0,1\}\(username\|password\)\)\):/#&/' postgres?.yml \
-    && sed -i 's/^      parameters:/      pg_hba:\n      - local all all trust\n      - host replication all all md5\n      - host all all all md5\n&\n        max_connections: 100/'  postgres?.yml \
-    && if [ "$COMPRESS" = "true" ]; then chmod u+s /usr/bin/sudo; fi \
-    && chmod +s /bin/ping \
+RUN chmod +s /bin/ping \
     && chown -R postgres:postgres "$PGHOME" /run /etc/haproxy
 
 USER postgres
